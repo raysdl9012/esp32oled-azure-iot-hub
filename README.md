@@ -7,7 +7,7 @@ Este es un proyecto para el microcontrolado ESP32 o ESP32OLED, fue desarrollado 
 Este proyecto es compatible con las librerias para Arduino del ESP32. Se recomienda utilizar el plugin de platformio para VSC, ya que cuenta con mayor compatibilidad.
 Si desea conocer mas de platformio, ingrese al siguiente [enlace](https://platformio.org).
 
-Este proyecto realiza dos pasos:
+Este proyecto realiza las siguientes funcionalidades:
 1. Conexion a Wifi
 2. Conexion a un servidor MQTT.
 3. Enviar recibir mensajes por medio de MQTT
