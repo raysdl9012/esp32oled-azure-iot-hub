@@ -8,7 +8,6 @@
 /**
  * Definir variables
  * */
-#define INPUT_LM35 39
 #define LED_OUTPUT_WIFI 12
 #define LED_OUTPUT_MQTT 13
 #define LED_OUTPUT_MQTT_LED 15
@@ -25,11 +24,17 @@ PubSubClient mqttClient(espClient); // Instancia conexion MQTT
 const char *ssid = "Familia2701";           // Nombre de la red
 const char *password_wifi = "Familia2701."; // Contraseña de la red
 
+
+const int freq = 5000;
+const int ledChannel = 0;
+const int resolution = 8;
+
+
 /**
  * Variables MQTT
  * */
 const int mqtt_port = 1883;                // Puerto
-const char *topic = "temperature";               // Topico
+const char *topic = "pwm";               // Topico
 const char *mqtt_server = "192.168.20.27"; // IP del servidor BROKER MQTT
 const char *username_mqtt = "alisa";       // Usuario del BROKER
 const char *password_mqtt = "card";        // Contraseña de BROKER
@@ -48,13 +53,10 @@ void connectWifi();
 // MQTT
 void reconnectMQTT();
 void defaultConfigurationMQTT();
-void blinkLedMQTT(String dataMessage);
+void managerLedByPWM(String dataMessage);
 void callback(char *topic, byte *payload, unsigned int length);
 
-void managerCode();
 
-// Read LM35
-void readSensorLM35();
 
 //****************************************
 //********** SETUP APPLICATION  **********
@@ -64,7 +66,8 @@ void setup()
   Serial.begin(115200);
   pinMode(LED_OUTPUT_WIFI, OUTPUT);
   pinMode(LED_OUTPUT_MQTT, OUTPUT);
-  pinMode(LED_OUTPUT_MQTT_LED, OUTPUT);
+  ledcSetup(ledChannel, freq, resolution);
+  ledcAttachPin(LED_OUTPUT_MQTT_LED, ledChannel);
   defaultConfigurationMQTT();
   connectWifi();
 }
@@ -83,7 +86,6 @@ void loop()
     }
     mqttClient.loop();
     digitalWrite(LED_OUTPUT_MQTT, HIGH);
-    managerCode();
   }
   else
   {
@@ -96,13 +98,6 @@ void loop()
 //******* DEFINICIÓN FUNCIONES  **********
 //****************************************
 
-/**
- * Funcion que se encarga de inicializar el codigo diferente a la conexion WiFi o MQTT
- * */
-void managerCode()
-{
-  readSensorLM35();
-}
 
 /**
  * Funcion que se encarga de realizar la conexion WiFi
@@ -135,7 +130,7 @@ void callback(char *topic, byte *payload, unsigned int length)
   }
   dataMessage.trim();
   Serial.println(dataMessage);
-  blinkLedMQTT(dataMessage);
+  managerLedByPWM(dataMessage);
 }
 
 /**
@@ -178,43 +173,14 @@ void reconnectMQTT()
  * Funcion que se encarga de prender o apagar un led 
  * por conexión MQTT
  * */
-void blinkLedMQTT(String dataFromMQTT)
+void managerLedByPWM(String dataFromMQTT)
 {
-  if (dataFromMQTT == "1")
-  {
-    digitalWrite(LED_OUTPUT_MQTT_LED, HIGH);
+  int valueLed = dataFromMQTT.toInt();
+  if(valueLed>255){
+    valueLed=255;
   }
-  if (dataFromMQTT == "0")
-  {
-    digitalWrite(LED_OUTPUT_MQTT_LED, LOW);
+  if(valueLed<0){
+    valueLed=0;
   }
-}
-
-/**
- * Funcion que se encarga de leer el valor de input analogo,
- * Convierte el voltaje a grados centigrados
- * Tambien saca un promedio de algunas muestras tomadas
- * */
-void readSensorLM35()
-{
-  int valTem = 0;
-  for (int i = 0; i < 800; i++)
-  {
-    valTem += analogRead(INPUT_LM35);
-  }
-  valTem = valTem / 800;
-  // Esta condicion es para tener un rango de cambio minimo segun la lectura
-  if (valTem > (temLM35Volts + 2) || valTem < (temLM35Volts - 2))
-  {
-    temLM35Volts = valTem;
-    float miliVolts = (temLM35Volts / 4095.0) * 5000;
-    float temLM35 = miliVolts / 10;
-    String temLM35Str=  String(temLM35);
-    Serial.print("Temperatura Cº: ");
-    Serial.println(temLM35);
-    char msg[50];
-    temLM35Str.toCharArray(msg, 50);
-    const char *topicSend = "temperature/get";
-    mqttClient.publish(topicSend, msg, 1);
-  }
+  ledcWrite(ledChannel, valueLed);   
 }
