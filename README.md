@@ -1,4 +1,4 @@
-# ESP32 MQTT
+# ESP32 Sensor de temperatura LM35 y MQTT
 
 Este es un ejemplo de como se realiza una conexion MQTT por medio de ESP32 utilizando el concepto de cliente y servidor para aplicaciones IOT
 
