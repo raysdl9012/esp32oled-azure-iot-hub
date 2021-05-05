@@ -3,73 +3,56 @@
  * */
 #include <Arduino.h>
 #include <WiFi.h>
-#include <PubSubClient.h>
+#include "Esp32MQTTClient.h"
+
+//****************************************
+//******* DECLARACION DE VARIABLES *******
+//****************************************
 
 /**
- * Definir variables
+ * Definir variables 
  * */
+#define INPUT_CNY_1 39
 #define LED_OUTPUT_WIFI 12
-#define LED_OUTPUT_MQTT 13
-#define LED_OUTPUT_MQTT_LED 15
+#define LED_OUTPUT_IOT_HUB 13
 
 /**
  * Instancias 
  * */
-WiFiClient espClient;               // Instancia que contiene la configuracion WiFi
-PubSubClient mqttClient(espClient); // Instancia conexion MQTT
+WiFiClient espClient; // Instancia que contiene la configuracion WiFi
 
 /**
  * Variables WiFi
  * */
-const char *ssid = "Familia2701";           // Nombre de la red
-const char *password_wifi = "Familia2701."; // Contraseña de la red
-
-
-const int freq = 5000;
-const int ledChannel = 0;
-const int resolution = 8;
-
-
-/**
- * Variables MQTT
- * */
-const int mqtt_port = 1883;                // Puerto
-const char *topic = "pwm";               // Topico
-const char *mqtt_server = "192.168.20.27"; // IP del servidor BROKER MQTT
-const char *username_mqtt = "alisa";       // Usuario del BROKER
-const char *password_mqtt = "card";        // Contraseña de BROKER
-
-/**
- * Variable que contiene el valor en milivoltios del sensor
- * */
-int temLM35Volts = 0;
-
+const char *ssid = "ssid";
+const char *password_wifi = "password_wifi";
+const char *connectionString = "HostName=demo-iot-resource.azure-devices.net;DeviceId=esp32;SharedAccessKey=+RaYowj2AfsRhuifdjwdRXwYcdlwOezuEotnq9SMmK4=";
+const char *messageData = "{\"deviceId\":\"%s\", \"topic\":%s, \"data\":%s }";
 //****************************************
 //******* DECLARACION DE FUNCIONES *******
 //****************************************
 
-// WIFI
+// Fución que se encarga de realizar una conexion por WIFI
 void connectWifi();
-// MQTT
-void reconnectMQTT();
-void defaultConfigurationMQTT();
-void managerLedByPWM(String dataMessage);
-void callback(char *topic, byte *payload, unsigned int length);
-
-
+// Funcion que se encarga de conectarse con iOT-Hub
+void connectToAzureIotHub();
+// Funcion que se encarga de enviar un mensaje
+void sendSimpleMessageToIotHub(String data);
+// Funcion que se encarga de detectar un mensaje de entrada desde iOT-Hub
+void messageCallback(const char *payLoad, int size);
+// funcion que se encarga de confirmar el envio del mensaje  desde iOT-Hub
+static void sendConfirmationCallback(IOTHUB_CLIENT_CONFIRMATION_RESULT result);
 
 //****************************************
 //********** SETUP APPLICATION  **********
 //****************************************
 void setup()
 {
-  Serial.begin(115200);
+  Serial.begin(9600);
   pinMode(LED_OUTPUT_WIFI, OUTPUT);
-  pinMode(LED_OUTPUT_MQTT, OUTPUT);
-  ledcSetup(ledChannel, freq, resolution);
-  ledcAttachPin(LED_OUTPUT_MQTT_LED, ledChannel);
-  defaultConfigurationMQTT();
+  pinMode(LED_OUTPUT_IOT_HUB, OUTPUT);
   connectWifi();
+  connectToAzureIotHub();
 }
 
 //****************************************
@@ -79,18 +62,14 @@ void loop()
 {
   if (WiFi.isConnected())
   {
-    if (!mqttClient.connected())
-    {
-      digitalWrite(LED_OUTPUT_MQTT, LOW);
-      reconnectMQTT();
-    }
-    mqttClient.loop();
-    digitalWrite(LED_OUTPUT_MQTT, HIGH);
+    sendSimpleMessageToIotHub(" Mensaje 1");
   }
   else
   {
     digitalWrite(LED_OUTPUT_WIFI, LOW);
+    digitalWrite(LED_OUTPUT_IOT_HUB, LOW);
     connectWifi();
+    connectToAzureIotHub();
   }
 }
 
@@ -98,9 +77,8 @@ void loop()
 //******* DEFINICIÓN FUNCIONES  **********
 //****************************************
 
-
 /**
- * Funcion que se encarga de realizar la conexion WiFi
+ * Funcion que se encarga de conectarse a internet
  * */
 void connectWifi()
 {
@@ -112,75 +90,62 @@ void connectWifi()
     delay(1000);
     Serial.println("Status WIFI: " + WiFi.status());
   }
-  Serial.println("" + WiFi.localIP().toString());
+  Serial.println(WiFi.localIP().toString());
   digitalWrite(LED_OUTPUT_WIFI, HIGH);
   randomSeed(micros());
 }
 
 /**
- * Funcion callback que se ejecuta cuando llega un mensaje por MQTT
+ * Funcion que se encarga de conextarse a Azure IOT-HUB
  * */
-void callback(char *topic, byte *payload, unsigned int length)
+void connectToAzureIotHub()
 {
-  String dataMessage = "";
-  Serial.println(topic);
-  for (int i = 0; i < length; i++)
+
+  Esp32MQTTClient_SetOption(OPTION_MINI_SOLUTION_NAME, "iot");
+  if (!Esp32MQTTClient_Init((const uint8_t *)connectionString))
   {
-    dataMessage += (char)payload[i];
+    Serial.println("Initializing IoT hub failed.");
+    return;
   }
-  dataMessage.trim();
-  Serial.println(dataMessage);
-  managerLedByPWM(dataMessage);
+  Esp32MQTTClient_SetSendConfirmationCallback(sendConfirmationCallback);
+  Esp32MQTTClient_SetMessageCallback(messageCallback);
+  Esp32MQTTClient_Check(true);
+
+  digitalWrite(LED_OUTPUT_IOT_HUB, HIGH);
+  randomSeed(micros());
+  sendSimpleMessageToIotHub("Start");
 }
 
 /**
- * Funcion que se encarga de configurar la conexión MQTT
+ * Funcion que se encarga de enviar un mensaje a iot-hub
  * */
-void defaultConfigurationMQTT()
+void sendSimpleMessageToIotHub(String data)
 {
-  Serial.println("Config MQTT: ");
-  Serial.print(mqtt_server);
-  Serial.print(mqtt_port);
-  mqttClient.setServer(mqtt_server, mqtt_port);
-  mqttClient.setCallback(callback);
+  char messagePayload[256];
+  snprintf(messagePayload, 256, messageData, "esp32", "sensors", data);
+  Serial.print("Sending data: ");
+  Serial.println(messagePayload);
+  EVENT_INSTANCE* message = Esp32MQTTClient_Event_Generate(messagePayload, MESSAGE);
+  Esp32MQTTClient_Event_AddProp(message, "test", "true");
+  Esp32MQTTClient_SendEventInstance(message);
 }
 
 /**
- * Funcion que se encarga de realizar la conexión MQTT con el BROKER
+ * Funcion que se encarga de confirmar el envío de un mensaje
  * */
-void reconnectMQTT()
+static void sendConfirmationCallback(IOTHUB_CLIENT_CONFIRMATION_RESULT result)
 {
-  while (!mqttClient.connected())
+  if (result == IOTHUB_CLIENT_CONFIRMATION_OK)
   {
-    Serial.println("** Try Connect to MQTT");
-    String clientId = "ESP32-" + String(random(0xffff), HEX);
-    if (mqttClient.connect(clientId.c_str(), username_mqtt, password_mqtt))
-    {
-      Serial.println("Connected to MQTT");
-      mqttClient.subscribe(topic);
-      Serial.println("Suscribe to topic to MQTT");
-      Serial.print(topic);
-    }
-    else
-    {
-      Serial.println("MQTT estatus" + mqttClient.state());
-      delay(5000);
-    }
+    Serial.println("Send Confirmation Callback finished.");
   }
 }
 
 /**
- * Funcion que se encarga de prender o apagar un led 
- * por conexión MQTT
+ * Funcion que se activa cuando hay un mensaje de entrada
  * */
-void managerLedByPWM(String dataFromMQTT)
+void messageCallback(const char *payLoad, int size)
 {
-  int valueLed = dataFromMQTT.toInt();
-  if(valueLed>255){
-    valueLed=255;
-  }
-  if(valueLed<0){
-    valueLed=0;
-  }
-  ledcWrite(ledChannel, valueLed);   
+  Serial.println("Message callback:");
+  Serial.println(payLoad);
 }
